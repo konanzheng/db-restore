@@ -1,0 +1,108 @@
+{
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devPath": "http://localhost:1420",
+    "distDir": "../dist",
+    "withGlobalTauri": true
+  },
+  "package": {
+    "productName": "db-restore",
+    "version": "0.0.0"
+  },
+  "tauri": {
+    "allowlist": {
+      "all": true,
+      "path": {
+        "all": true
+      },
+      "dialog":{
+        "all":true,
+        "open": true,
+        "save":true
+      },
+      "fs": {
+        "scope": ["**"],
+        "all": true,
+        "copyFile": true,
+        "createDir": true,
+        "exists": true,
+        "readDir": true,
+        "readFile": true,
+        "removeDir": false,
+        "removeFile": false,
+        "renameFile": false,
+        "writeFile": true
+      },
+      "globalShortcut":{
+        "all": true
+      },
+      "protocol": {
+        "all": true,
+        "asset": true,
+        "assetScope": ["$APPDATA/**","$DATA/**","$TEMP/**","$LOCALDATA/**","**"]
+      }
+    },
+    "bundle": {
+      "active": true,
+      "publisher": "ruizhaozheng@aliyun.com",
+      "category": "DeveloperTool",
+      "copyright": "",
+      "deb": {
+        "depends": []
+      },
+      "externalBin": [],
+      "icon": [
+        "icons/32x32.png",
+        "icons/128x128.png",
+        "icons/128x128@2x.png",
+        "icons/icon.icns",
+        "icons/icon.ico"
+      ],
+      "identifier": "com.kevin.ofd-viewer",
+      "longDescription": "ofd viewer 一个免费的ofd预览工具",
+      "macOS": {
+        "entitlements": null,
+        "exceptionDomain": "",
+        "frameworks": [],
+        "providerShortName": null,
+        "signingIdentity": null
+      },
+      "resources": [],
+      "shortDescription": "OFD查看工具",
+      "targets": "all",
+      "windows": {
+        "certificateThumbprint": null,
+        "digestAlgorithm": "sha256",
+        "timestampUrl": ""
+      }
+    },
+    "security": {
+      "csp": "default-src blob: data: filesystem: ws: http: https: 'unsafe-eval' 'unsafe-inline'; img-src 'self' asset: https://asset.localhost"
+    },
+    "updater": {
+      "active": false
+    },
+    "cli":{
+      "args": [
+        {
+          "index": 1,
+          "name": "file",
+          "short": "f",
+          "takesValue": true,
+          "description": "ofd file",
+          "numberOfValues": 1
+        }
+      ]
+    },
+    "windows": [
+      {
+        "fullscreen": false,
+        "height": 380,
+        "resizable": false,
+        "title": "mysql数据还原工具",
+        "width": 680
+      }
+    ]
+  }
+}
