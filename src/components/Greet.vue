@@ -6,10 +6,20 @@ const file_path = ref("E:\\文档\\新东方\\20201228124959.nb3");
 const url = ref(" mysql://root:mysql@127.0.0.1:3306/demo");
 const working = ref(false);
 const status = ref("");
+const percentage = ref(0);
+
 onMounted(()=>{
   console.log(window.__TAURI__)
   window.__TAURI__.event.listen("tauri://file-drop", (event) => {
       file_path.value = event.payload[0];
+  });
+  // 监听事件
+  window.__TAURI__.event.listen('percentage', (event) => {
+    console.log(event);
+    if(event.payload && working) {
+      percentage.value = event.payload.percentage/100;
+      status.value = '正在还原...' + event.payload.msg;
+    }
   });
 
 })
@@ -74,8 +84,9 @@ function pickFile() {
           <template #prepend>连接串:</template>
         </el-input>
       </div>
-      <div>
+      <div  style="width:100%">
         <el-text >{{ status }}</el-text>
+        <el-progress :percentage="percentage" v-show="working"/>
           <!-- <el-button class="button" type="info" @click="pickFile()"  :icon="FolderOpened" :disabled="working">选择文件</el-button>
           <el-button class="button" type="primary" @click="restore()" :icon="Coin" :disabled="working">开始还原</el-button> -->
       </div>

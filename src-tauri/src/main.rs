@@ -7,13 +7,15 @@ extern crate simple_log;
 extern crate tar;
 extern crate flate2;
 
-use sqlx::{Executor, MySqlPool, mysql,Row,ConnectOptions};
+use sqlx::{Executor, MySqlPool, mysql,ConnectOptions};
 use sqlx::mysql::MySqlConnectOptions;
 use sqlx::mysql::MySqlSslMode;
+use tauri::{ AppHandle, Manager};
 use std::str::FromStr;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 use std::time::Duration;
-use std::env;
+use std::{env};
 use std::path::Path;
 use std::fs;
 use std::{
@@ -24,7 +26,7 @@ use std::path::PathBuf;
 use simple_log::LogConfig;
 use serde_json::Value;
 
-use std::io::prelude::*;
+use std::io::{prelude::*};
 use tar::Archive;
 use flate2::read::GzDecoder;
 
@@ -35,6 +37,11 @@ struct Table{
     fields: String,
     data_files: Vec<PathBuf>,
     rows: u64,
+}
+#[derive(Clone,Serialize, Deserialize)]
+struct Payload {
+    percentage: usize,
+    msg: String,
 }
 fn main() {
     
@@ -57,20 +64,23 @@ fn main() {
         .expect("error while running tauri application");
 }
 
-
+static SUCCESS_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 #[tauri::command]
-async fn restore(file_path:&str,url:&str) ->Result<String, ()>{
-    print!("开始导入文件:{},使用连接字符串{}",&file_path,url);
+async fn restore(file_path:&str,url:&str,app_handle:AppHandle) ->Result<String, ()>{
+    
+    let now = Instant::now();
+    print!("开始解析文件:{}",&file_path);
     const SIZE:u32 = 100;
     let  mut tables: Vec<Table> = Vec::<Table>::new();
     let  mut files: Vec<String> = Vec::<String>::new();
     let mut result = String::new();
     // 解压nb3文件
     if file_path.ends_with(".nb3") {
-        tables = extract(file_path.clone());
+        tables = extract(file_path.clone()).await;
         if tables.len() > 0 {
-            println!("解析文件成功！,需要导入的表有{}个",tables.len());
+            let duration = now.elapsed().as_millis();  
+            println!("解析文件成功！,需要导入的表有{}个,共耗时:{}ms",tables.len(),duration);
         } else {
             result.push_str("解析文件失败！");
             info!("{}",result);
@@ -79,7 +89,8 @@ async fn restore(file_path:&str,url:&str) ->Result<String, ()>{
     } else {
         files = split(file_path.clone());
         if files.len() > 0 {
-            info!("解析文件成功！,需要导入的sql有{}个",files.len());
+            let duration = now.elapsed().as_millis();  
+            info!("解析文件成功！,需要导入的sql有{}个,共耗时:{}ms",files.len(),duration);
         } else {
             result.push_str("解析文件失败！");
             info!("{}",result);
@@ -95,7 +106,7 @@ async fn restore(file_path:&str,url:&str) ->Result<String, ()>{
         conn.execute("SET sql_log_bin=OFF;").await?;
         conn.execute("SET FOREIGN_KEY_CHECKS=0;").await?;
         conn.execute("SET global max_allowed_packet = 2*1024*1024*10;").await?;
- 
+        // conn.execute("SET autocommit = 0;").await?;
         Ok(())
      }))
     .connect_with(opts).await;
@@ -106,45 +117,49 @@ async fn restore(file_path:&str,url:&str) ->Result<String, ()>{
     } else {
         pool = c.unwrap();
         info!("数据库连接成功: {} 开始处理", url);
-        let now = Instant::now();
         const SIZE:u32 = 100;
-        info!("数据库连接池 : \n{:?}", pool);
-        let fkc:u64 = sqlx::query("SELECT  @@FOREIGN_KEY_CHECKS as fkc;").fetch_one(&pool).await.unwrap().get_unchecked("fkc");
-        info!("FOREIGN_KEY_CHECKS:{}",fkc);
+        let mut file_total = 0;
+        for table in &tables {
+            file_total += table.data_files.len();
+        }
+        SUCCESS_COUNT.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |_x| Some(0)).unwrap();
         // 循环每个table处理
         let mut handles2 = Vec::with_capacity(10);
-        for table in tables {
-            handles2.push(tauri::async_runtime::spawn(execute(table.clone(),pool.clone())));
+        for table in &tables {
+            match pool.execute(sqlx::query(&format!("drop table if exists {}",table.name))).await {
+                Ok(_ok) => {
+                    match pool.execute(sqlx::query(&table.ddl)).await {
+                        Ok(_ok) => {
+                            if table.rows > 0 {
+                                for f in &table.data_files{
+                                    handles2.push(tauri::async_runtime::spawn(execute_gz(f.clone(),table.name.clone(),table.fields.clone(),pool.clone(),app_handle.clone(),file_total)));
+                                } 
+                            }                          
+                        },
+                        Err(e) => {
+                            info!("创建表{}失败,错误信息:{:?}",table.name,e);
+                        }
+                    }
+                },
+                Err(e) => {
+                    info!("drop表{}失败,错误信息:{:?}",table.name,e);
+                }
+            }
         }
         for handle in handles2 {
             let _r = handle.await;
         }
-        let mut i = 0;
-        // while i < tables.len() {
-        //     let mut handles2 = Vec::with_capacity(10);
-        //     while handles2.len()<10 && i < tables.len() {
-        //         handles2.push(tauri::async_runtime::spawn(execute(tables[i].clone(),pool.clone())));
-        //         i+=1;
-        //     }
-        //     for handle in handles2 {
-        //         let _r = handle.await;
-        //     }
-        // }
-        while i < files.len() {
-            let mut j = 0;
-            let mut handles2 = Vec::with_capacity(100);
-            while j < 100 && i < files.len() {
-                handles2.push(tauri::async_runtime::spawn(source(files[i].clone(),pool.clone())));
-                i+=1;
-                j+=1;
-            }
-            for handle in handles2 {
-                let _r = handle.await;
-            }
+        let mut handles2 = Vec::with_capacity(100);
+        for f in &files {
+            handles2.push(source(f.clone(),pool.clone()));
         }
+        for handle in handles2 {
+            let _r = handle.await;
+        }
+        pool.execute(sqlx::query("commit;"));
         pool.close().await;
         let duration = now.elapsed().as_millis();    
-        result = format!("导入成功,总耗时：{} ms", duration);
+        result = format!("共{}个数据文件，导入成功{}个,总耗时：{} ms", file_total,SUCCESS_COUNT.load(Ordering::SeqCst),duration);
         info!("{}", result);        
         Ok(result)
     }
@@ -166,7 +181,7 @@ async fn source(file: String, pool2: MySqlPool){
     let f_len = f.metadata().unwrap().len();
     let mut reader = BufReader::new(f);
     let mut split_content = String::from("");
-    // TODO 先执行关闭bin日志，关闭事务，关闭主键检查 操作再开始执行sql,批量插入数据条数调优每次处理10000条数据
+    // 批量插入数据条数调优每次处理10000条数据
     if f_len > 1024*1024*10 {
         let batch_insert_szie = 500;
         let mut ddl = String::from("");
@@ -227,45 +242,11 @@ async fn source(file: String, pool2: MySqlPool){
     }
     // println!("{}文件导入结束",file);
 }
-async fn execute(table:  Table, pool2:MySqlPool ){
-    // 先删除表结构，再执行ddl语句
-    let drop_result = pool2.execute(sqlx::query(&format!("drop table if exists  {}",table.name))).await;
-    match drop_result {
-        Ok(_ok) => {
-            let ddl_result = pool2.execute(sqlx::query(&table.ddl)).await;
-            match  ddl_result {
-                Ok(_ok) => {   
-                    let name = table.name.clone();
-                    let fields = table.fields.clone();
-                    if table.data_files.len() == 0 {
-                        info!("{}表数据处理完成,共0行,导入0行",name);
-                    } else {
-                        let mut handles2 = Vec::with_capacity(10);
-                        for j in 0..table.data_files.len(){
-                            handles2.push(execute_gz(table.data_files[j].clone(),name.clone(),fields.clone(),pool2.clone()));
-                        }
-                        for handle in handles2 {
-                            let _r = handle.await;
-                        }
-                        let count_sql = format!("select count(1) as count from {}",table.name);
-                        let row = sqlx::query(&count_sql).fetch_one(&pool2).await.unwrap();
-                        let count:u32 = row.get_unchecked("count");
-                        info!("{}表数据处理完成,共{}行,导入{}行",name,table.rows,count);
-                    }
-                },
-                Err(_e) => {
-                    info!("创建{}表sql出错:{:?} ",table.name,_e);
-                }
-            }
-        },
-        Err(_e) => {
-            info!("删除{}表sql出错:{:?} ",table.name,_e);
-        }
-    }
+
 
     
-}
-async fn execute_gz (gz_file:PathBuf,table_name:String,table_fields:String,pool2:MySqlPool) {
+// }
+async fn execute_gz (gz_file:PathBuf,table_name:String,table_fields:String,pool2:MySqlPool,app_handle:AppHandle,total:usize) {
     // 读取文本内容
     let f = File::open(gz_file.clone()).unwrap();
     let mut gz = GzDecoder::new(f);
@@ -279,13 +260,20 @@ async fn execute_gz (gz_file:PathBuf,table_name:String,table_fields:String,pool2
     let _r = pool2.execute(sqlx::query(&insert_sql)).await;
     match _r {
         Ok(_ok) => {
+            let curr = SUCCESS_COUNT.fetch_add(1, Ordering::Acquire);
+            // let percentage = (curr*100.0/total).into();
+            // 计算百分比
+            let percentage = curr*10000/total;
+            let msg = format!("共{}个数据文件，完成导入{}个", total,curr);
+            let payload = Payload{ percentage,msg};
+            app_handle.emit_all("percentage", payload).unwrap();
         },
         Err(_e) => {
             info!("插入数据文件{},到表{},出错:{} ",gz_file.display(),table_name,_e);
         }
     }
 }
-fn extract(file_path:&str )->Vec<Table>{
+async fn extract(file_path:&str )->Vec<Table>{
     // 创建文件夹 _nb3
     let nb_file = Path::new(file_path);
     let file = File::open(file_path).unwrap();
@@ -302,43 +290,50 @@ fn extract(file_path:&str )->Vec<Table>{
     meta_path.push("meta.json");
     let v: Value = serde_json::from_str(&fs::read_to_string(meta_path).unwrap()).unwrap();
     let objects = v["Objects"].as_array().unwrap();
-    for obj in objects {
+    let mut handles2 = Vec::with_capacity(10);
+    for obj in objects{
         if obj["Type"].as_str().unwrap() == "Table" {
-            let name = obj["Name"].as_str().unwrap().to_string();
-            let rows= obj["Rows"].as_str().unwrap().to_string().parse().unwrap();
-            let meta = obj["Metadata"]["Filename"].as_str().unwrap().to_string();
-            // 处理数据文件
-            // let table_meta = format!("./_nb3/{}",meta);
-            let table_meta = dir.clone().join(meta);
-            // println!("处理表{} JSON信息 对应gz文件{}",name,table_meta.display());
-            let tar_gz = File::open(table_meta).unwrap();
-            let mut gz = GzDecoder::new(tar_gz);
-            let mut s = String::new();
-            gz.read_to_string(&mut s).unwrap();
-            let t: Value = serde_json::from_str(&s).unwrap();
-            let ddl = t["DDL"].as_str().unwrap().to_string();
-            let mut data_files = Vec::new();
-            let data = t["Data"].as_array().unwrap();
-            for d in data {
-                data_files.push(dir.clone().join(d["Filename"].as_str().unwrap().to_string()));
-            }
-            let fields_array = t["Fields"].as_array().unwrap();
-            let mut fields_vec = Vec::new();
-            for fa in fields_array {
-                fields_vec.push(fa.as_str().unwrap().to_string());
-            }
-            let fields = fields_vec.join(",");
-            let table = Table{
-                name,
-                rows,
-                ddl,
-                fields,
-                data_files
-            };  
-            tables.push(table);
+            handles2.push(tauri::async_runtime::spawn(create_table(obj.clone(),dir.clone())));
         }
     }
+    for handle in handles2 {
+        let t = handle.await.unwrap();
+        tables.push(t);
+    }
     return tables;
+}
+async fn create_table(obj: Value,dir:PathBuf) -> Table {
+    let name = obj["Name"].as_str().unwrap().to_string();
+    let rows= obj["Rows"].as_str().unwrap().to_string().parse().unwrap();
+    let meta = obj["Metadata"]["Filename"].as_str().unwrap().to_string();
+    // 处理数据文件
+    // let table_meta = format!("./_nb3/{}",meta);
+    let table_meta = dir.clone().join(meta);
+    // println!("处理表{} JSON信息 对应gz文件{}",name,table_meta.display());
+    let tar_gz = File::open(table_meta).unwrap();
+    let mut gz = GzDecoder::new(tar_gz);
+    let mut s = String::new();
+    gz.read_to_string(&mut s).unwrap();
+    let t: Value = serde_json::from_str(&s).unwrap();
+    let ddl = t["DDL"].as_str().unwrap().to_string();
+    let mut data_files = Vec::new();
+    let data = t["Data"].as_array().unwrap();
+    for d in data {
+        data_files.push(dir.clone().join(d["Filename"].as_str().unwrap().to_string()));
+    }
+    let fields_array = t["Fields"].as_array().unwrap();
+    let mut fields_vec = Vec::new();
+    for fa in fields_array {
+        fields_vec.push(fa.as_str().unwrap().to_string());
+    }
+    let fields = fields_vec.join(",");
+    Table{
+        name,
+        rows,
+        ddl,
+        fields,
+        data_files
+    }
 }
 // 从单一sql文件分割成多个sql文件
 fn split(file_path:&str )->Vec<String>{
