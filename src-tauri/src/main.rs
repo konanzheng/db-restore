@@ -170,7 +170,7 @@ async fn restore_sql_file(file_path: &str,pool2:MySqlPool,app_handle:AppHandle)-
                 break;
             }
             let mut trim = String::new();
-            match ( f.read_line(&mut trim))
+            match  f.read_line(&mut trim)
             {
                 Ok(_) => {
                     // let trim = line.trim();
@@ -313,9 +313,9 @@ async fn execute_gz (gz_file:PathBuf,table_name:String,table_fields:String,pool2
     let mut data = String::new();
     gz.read_to_string(&mut data).unwrap();
     // 处理特殊字符 "\u{1e}"
-    while data.contains("\u{1e}") {
-        data = data.replace("\u{1e}", ",");
-    }
+    data = data.replace("\u{1e}", ",");
+    
+    data = data.replace("\n", ",");
     let insert_sql = format!("insert into {} ({}) values {} ",table_name,table_fields,data);
     let _r = pool2.execute(sqlx::query(&insert_sql)).await;
     match _r {
@@ -329,7 +329,7 @@ async fn execute_gz (gz_file:PathBuf,table_name:String,table_fields:String,pool2
             app_handle.emit_all("percentage", payload).unwrap();
         },
         Err(_e) => {
-            info!("插入数据文件{},到表{},出错:{} ",gz_file.display(),table_name,_e);
+            info!("插入数据文件{},sql:{},到表{},出错:{} ",gz_file.display(),insert_sql,table_name,_e);
         }
     }
 }
