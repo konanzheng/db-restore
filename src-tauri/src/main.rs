@@ -68,7 +68,7 @@ fn main() {
 static SUCCESS_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 #[tauri::command]
-async fn restore(file_path:&str,url:&str,app_handle:AppHandle) ->Result<String, ()>{
+async fn restore(file_path:&str,url:&str,app_handle:AppHandle) ->Result<String, String>{
     
     let now = Instant::now();
     print!("开始解析文件:{}",&file_path);
@@ -87,8 +87,8 @@ async fn restore(file_path:&str,url:&str,app_handle:AppHandle) ->Result<String, 
     .connect_with(opts).await;
     if c.is_err() {
         result = format!("错误!数据库连接字符串有误，请重新输入,详细错误信息:{:?}",c.err());
-        info!("{}",result);
-        Err(())
+        info!("{}",&result);
+        Err(result)
     } else {
         pool = c.unwrap();
         info!("数据库连接成功: {} 开始处理", url);
