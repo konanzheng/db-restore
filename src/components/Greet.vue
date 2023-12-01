@@ -2,8 +2,8 @@
 import { ref, onMounted } from "vue";
 import { FolderOpened,Coin } from '@element-plus/icons-vue'
 
-const file_path = ref("E:\\文档\\新东方\\20201228124959.nb3");
-const url = ref(" mysql://root:mysql@127.0.0.1:3306/demo");
+const file_path = ref("E:\\work\\dagl\\hongyan\\数据\\20231201100202.nb3");
+const url = ref("mysql://hams:hams@127.0.0.1:3306/hongyan");
 const working = ref(false);
 const status = ref("");
 const percentage = ref(0);
@@ -73,7 +73,7 @@ function pickFile() {
     <el-space direction="vertical" :size="30" style="padding-top: 0;">
       <div>
         <el-input  size="large" v-model="file_path" placeholder="通过拖拽或者点击选择,指定要导入的文件" style="min-width: 600px;" >
-          <template #prepend>文件路径:</template>
+          <template #prepend>导入文件路径:</template>
           <template #append>
             <el-button type="info" @click="pickFile()"  :icon="FolderOpened" :disabled="working">打开</el-button>
           </template>
@@ -81,7 +81,7 @@ function pickFile() {
       </div>
       <div>
         <el-input  size="large" v-model="url" placeholder="输入mysql连接字符串" style="min-width: 600px;" >
-          <template #prepend>连接串:</template>
+          <template #prepend>数据库连接串:</template>
         </el-input>
       </div>
       <div  style="width:100%">

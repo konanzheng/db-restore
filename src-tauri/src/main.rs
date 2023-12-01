@@ -137,7 +137,7 @@ async fn restore(file_path:&str,url:&str,app_handle:AppHandle) ->Result<String, 
             }
         } else {
 
-            let totla_size = restore_sql_file(file_path.clone(),pool.clone(),app_handle.clone()).await;
+            let totla_size = restore_sql_file(file_path,pool.clone(),app_handle.clone()).await;
             let duration = now.elapsed().as_millis();    
             result = format!("文件总大小:{}bytes,总耗时：{} ms", totla_size,duration);
         }
@@ -313,9 +313,11 @@ async fn execute_gz (gz_file:PathBuf,table_name:String,table_fields:String,pool2
     let mut data = String::new();
     gz.read_to_string(&mut data).unwrap();
     // 处理特殊字符 "\u{1e}"
-    data = data.replace("\u{1e}", ",");
-    
-    data = data.replace("\n", ",");
+    // info!("替换之前{}",data);
+    data = data.replace("\u{1e}\n(", ",(");
+    // data = data.replace("\u{1e}", ",");
+    data = data.replace("\n(", ",(");
+    // info!("替换之后{}",data);
     let insert_sql = format!("insert into {} ({}) values {} ",table_name,table_fields,data);
     let _r = pool2.execute(sqlx::query(&insert_sql)).await;
     match _r {
